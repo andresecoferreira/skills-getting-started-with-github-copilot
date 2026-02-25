@@ -1,26 +1,21 @@
 """
-High School Management System API
+Shared fixtures for FastAPI tests
 
-A super simple FastAPI application that allows students to view and sign up
-for extracurricular activities at Mergington High School.
+This module provides fixtures used across all test files, following the
+Arrange-Act-Assert (AAA) testing pattern:
+- Arrange: Setup test data and state (fixtures provide this)
+- Act: Execute the code being tested (in individual test functions)
+- Assert: Verify the expected outcomes (in individual test functions)
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-import os
-from pathlib import Path
+import pytest
+from copy import deepcopy
+from fastapi.testclient import TestClient
+from src.app import app, activities
 
-app = FastAPI(title="Mergington High School API",
-              description="API for viewing and signing up for extracurricular activities")
 
-# Mount the static files directory
-current_dir = Path(__file__).parent
-app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
-          "static")), name="static")
-
-# In-memory activity database
-activities = {
+# Store the initial state of activities for reset
+INITIAL_ACTIVITIES = {
     "Chess Club": {
         "description": "Learn strategies and compete in chess tournaments",
         "schedule": "Fridays, 3:30 PM - 5:00 PM",
@@ -78,53 +73,71 @@ activities = {
 }
 
 
-@app.get("/")
-def root():
-    return RedirectResponse(url="/static/index.html")
-
-
-@app.get("/activities")
-def get_activities():
-    return activities
-
-
-@app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    # Get the specific activity
-    activity = activities[activity_name]
-
-    # Validate student is not already signed up
-    if email in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student already signed up for this activity")
-
-    # Validate activity is not full
-    if len(activity["participants"]) >= activity["max_participants"]:
-        raise HTTPException(status_code=400, detail="Activity is full")
+@pytest.fixture
+def client():
+    """
+    Provides a FastAPI TestClient for making API requests in tests.
     
-    # Add student
-    activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
+    This fixture is used in the Arrange phase of AAA pattern to setup
+    the test client before making requests.
+    
+    Returns:
+        TestClient: A client for testing FastAPI endpoints
+    """
+    return TestClient(app)
 
 
-@app.delete("/activities/{activity_name}/participants/{email}")
-def remove_participant(activity_name: str, email: str):
-    """Remove a participant from an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
+@pytest.fixture(autouse=True)
+def reset_activities():
+    """
+    Automatically resets the activities database after each test.
+    
+    This fixture uses autouse=True to run after every test, ensuring test isolation.
+    It prevents test pollution by restoring the initial state of the activities database.
+    
+    Critical for maintaining test independence in the AAA pattern:
+    - Each test Arranges data with a clean slate
+    - Acts on the endpoint
+    - Asserts results without interference from previous tests
+    
+    Yields:
+        None: Control to the test, then resets activities after test completes
+    """
+    yield
+    # Reset activities to initial state after each test (teardown phase)
+    activities.clear()
+    activities.update(deepcopy(INITIAL_ACTIVITIES))
 
-    # Get the specific activity
-    activity = activities[activity_name]
 
-    # Validate student is signed up
-    if email not in activity["participants"]:
-        raise HTTPException(status_code=404, detail="Participant not found in this activity")
+@pytest.fixture
+def sample_email():
+    """
+    Provides a consistent test email address for signup tests.
+    
+    Returns:
+        str: A test email address
+    """
+    return "test.student@mergington.edu"
 
-    # Remove the participant
-    activity["participants"].remove(email)
-    return {"message": f"Removed {email} from {activity_name}"}
+
+@pytest.fixture
+def sample_activity():
+    """
+    Provides a consistent test activity name.
+    
+    Returns:
+        str: A valid activity name from the database
+    """
+    return "Chess Club"
+
+
+@pytest.fixture
+def full_activity_name():
+    """
+    Provides an activity name for testing max_participants scenarios.
+    Creates a scenario where we can test the activity becoming full.
+    
+    Returns:
+        str: Activity name with fewer initial participants
+    """
+    return "Debate Team"  # Has max_participants: 14
